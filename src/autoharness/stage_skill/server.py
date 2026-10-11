@@ -219,7 +219,9 @@ def serve(stdin=None, stdout=None):
         except json.JSONDecodeError:
             response = _err(None, -32700, "parse error")
         else:
-            response = handle(request, run_id=run_id, root=root)
+            response = (handle(request, run_id=run_id, root=root)
+                        if isinstance(request, dict)
+                        else _err(None, -32600, "invalid request"))
         if response is not None:
             stdout.write(json.dumps(response) + "\n")
             stdout.flush()
