@@ -16,3 +16,9 @@ def test_recognized_local_prefix_is_an_exact_carried_pointer(prefix):
 def test_unrelated_prefix_or_longer_filename_does_not_reference_carried_file(ref):
     result = validate.validate(INTENT, BODY + f'Run `{ref}`.\n')
     assert any(family == 'structure' and 'not referenced' in detail for family, detail in result['findings'])
+
+
+@pytest.mark.parametrize('line', ['Run scripts/run.sh.', 'Run scripts/run.sh, then stop.', 'Run ./scripts/run.sh.'])
+def test_sentence_punctuation_after_a_bare_pointer_is_not_part_of_the_path(tmp_path, line):
+    result = validate.validate(INTENT, BODY + line + '\n', base_dir=tmp_path)
+    assert result['ok'], result['findings']
