@@ -225,3 +225,10 @@ def test_private_key_block_redacts_body_and_end_line():
         assert leak not in out, f"leaked: {leak}"
     assert "[REDACTED:" in out
     assert redact.secret_hits(raw) == ["private_key_block"]
+
+
+def test_fine_grained_github_pat_is_redacted():
+    pat = "github_pat_11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"
+    raw = f"cloned with {pat} ok"
+    assert redact.redact(raw) == "cloned with [REDACTED:secret:github_token] ok"
+    assert redact.secret_hits(raw) == ["github_token"]
