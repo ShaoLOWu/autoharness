@@ -11,7 +11,9 @@ linked git worktree that dir is remapped to the main worktree root, so counters 
 from all worktrees of one repo land in one place and survive worktree removal. Only the
 linked-worktree case is remapped (git-dir differs from git-common-dir): plain repos, repo
 subdirectories, and non-git directories are kept verbatim, so a nested project can never be
-attributed to an enclosing repo. Any git failure falls back to the dir itself (fail-safe).
+attributed to an enclosing repo. The one exception is a path inside a repo's `.claude` dir (a
+session started in <repo>/.claude/skills): that dir holds the project's config and is never a project
+itself, so it maps to the dir that owns it. Any git failure falls back to the dir itself (fail-safe).
 A reflector/curator child session skips all of this: spawn pins the parent's resolved root in its env.
 """
 import os
@@ -34,9 +36,24 @@ def _check_layer(layer):
         raise ValueError(f"unknown layer: {layer!r} (expected one of {LAYERS})")
 
 
+# a name becomes a directory or file, and atomic writes add `.<8 chars>.tmp` to it: stay well inside
+# NAME_MAX (255 bytes), and away from what Windows refuses (reserved device names, a trailing dot)
+MAX_NAME_LEN = 100
+_WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+
+
 def _check_name(name):
     if not isinstance(name, str) or ".." in name or not _SAFE_NAME.match(name):
         raise ValueError(f"unsafe symbol name: {name!r}")
+
+
+def check_new_name(name):
+    """A name autoharness is about to create: safe, and usable on every filesystem. Existing names
+    (a user's `con` skill, a long legacy one) are only held to _check_name, so reading never breaks."""
+    _check_name(name)
+    if len(name) > MAX_NAME_LEN or name.endswith(".") or name.split(".")[0].lower() in _WINDOWS_RESERVED:
+        raise ValueError(f"unusable new name: {name!r} (over {MAX_NAME_LEN} chars, a trailing dot, or "
+                         "reserved on Windows)")
 
 
 def _main_worktree_root(cwd):
@@ -56,9 +73,32 @@ def _main_worktree_root_resolved(cwd):
         git_dir, common_dir = ((Path(cwd) / line).resolve() for line in lines[:2])
         if git_dir != common_dir:
             return common_dir.parent
+        return _owner_of_config_dir(Path(cwd))
     except (OSError, subprocess.SubprocessError):
         pass
     return Path(cwd)
+
+
+def _owner_of_config_dir(path):
+    """Left as-is: a path outside any `.claude`, one under the home `.claude` (its owner's `.claude` is
+    the global layer, so mapping would merge the two layers), and a separate repo checked out inside
+    a `.claude` (a nested project keeps its own root)."""
+    if ".claude" not in path.parts:
+        return path
+    config = Path(*path.parts[:path.parts.index(".claude") + 1])
+    if config.parent == Path.home().resolve():
+        return path
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=path, capture_output=True, text=True, timeout=5,
+    )
+    toplevel = proc.stdout.strip()
+    if proc.returncode != 0 or not toplevel:
+        return path
+    toplevel = Path(toplevel).resolve()
+    if toplevel != config and toplevel.is_relative_to(config):
+        return path
+    return config.parent
 
 
 def default_root(layer):
@@ -97,14 +137,14 @@ SUBFILE_DIRS = ("scripts", "templates", "assets", "references")
 EVIDENCE_PREFIX = "references/evidence-"
 
 
-def check_subfile(rel):
+def check_subfile(rel, *, new=False):
     if not isinstance(rel, str) or not rel or ".." in rel or "\\" in rel:
         raise ValueError(f"unsafe subfile path: {rel!r}")
     segments = rel.split("/")
     if len(segments) < 2 or segments[0] not in SUBFILE_DIRS:
         raise ValueError(f"subfile path must sit under one of {SUBFILE_DIRS}: {rel!r}")
     for segment in segments:
-        _check_name(segment)
+        (check_new_name if new else _check_name)(segment)
 
 
 def subfile_path(layer, name, rel, root=None):
