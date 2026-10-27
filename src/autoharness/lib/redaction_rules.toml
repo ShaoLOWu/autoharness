@@ -36,7 +36,10 @@ pattern = '''(?i)(api[_-]?key|secret|token|password)(?:\\?['"])?\s*[:=]\s*(?:\\?
 
 [[pii]]
 name = "email"
-pattern = '''[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'''
+# the local part is capped at 64 chars (RFC 5321): the unbounded `+` backtracks
+# quadratically on long runs with no usable `@` (every start position scans to
+# the end of the run and back), while valid addresses never exceed the cap
+pattern = '''[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'''
 
 [[pii]]
 name = "ssn"
